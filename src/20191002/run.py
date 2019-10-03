@@ -11,7 +11,7 @@ from tensorflow.keras.applications.resnet50 import ResNet50
 
 import util
 
-#notes: added augment_prob=0.5, normalize with read_dicom3, weighted log loss, mixed
+#notes: multi label weighting, fixed folds, load from dcms
 
 config = {
     'train_path': '../data/stage_1_train_images_jpg/',
@@ -21,7 +21,8 @@ config = {
     'workers': 8,
     'image_size': (224, 224),
     'augment_prob': 0.5,
-    'experiment': '20191001-7',
+    'fold_no': 0,
+    'experiment': '20191001-8',
     'note': '...',
     'data_path': '../data'
 }
@@ -30,41 +31,34 @@ config = {
 def run(config, resume_training=False):
         
     experiment_path = util.prepare_experiment(config)
-    print(f"running {experiment_path}")
+    fold_no = str(config['fold_no'])
+    print(f"running {experiment_path}, fold_no={fold_no}")
     
-    #test_df = util.read_testset()
-    df = util.read_trainset()
-
-    # train set (90%) and validation set (10%)
-    from sklearn.model_selection import ShuffleSplit
-    ss = ShuffleSplit(n_splits=5, test_size=0.1, random_state=42).split(df.index)
-
-    # will just do one fold
-    train_idx, valid_idx = next(ss)
-
-    print(f"train: {len(train_idx)}, val: {len(valid_idx)}")
-    print(f"train_steps: {len(train_idx)//config['batch_size']}")
+    train_df, val_df = util.read_trainval(fold_no)
+    batch_size = config['batch_size']
+    print(f"train: {len(train_df)}, val: {len(val_df)}")
+    print(f"train_steps: {len(train_df)//batch_size}")
 
     gen = util.BalancedTrainDataGenerator(
-        df.iloc[train_idx], 
+        train_df, 
         config['batch_size'], 
         config['image_size'], 
         augment_prob=config['augment_prob'], 
-        #img_dir=config['train_path_dicom'], 
-        #img_ext='dcm'
-        img_dir=config['train_path'], 
-        img_ext='jpg'
+        img_dir=config['train_path_dicom'], 
+        img_ext='dcm'
+        #img_dir=config['train_path'], 
+        #img_ext='jpg'
     )
     
     val_gen = util.RsnaDataGenerator(
-        df.iloc[valid_idx], 
+        val_df, 
         config['batch_size'], 
         config['image_size'], 
         augment_prob=None,
-        #img_dir=config['train_path_dicom'],
-        #img_ext='dcm'
-        img_dir=config['train_path'],
-        img_ext='jpg'
+        img_dir=config['train_path_dicom'],
+        img_ext='dcm'
+        #img_dir=config['train_path'],
+        #img_ext='jpg'
     )
     
     model = util.Model1(
@@ -100,27 +94,18 @@ def run(config, resume_training=False):
     
 
 def evaluate(config):
-    #test_df = util.read_testset()
-    df = util.read_trainset()
-
-    # train set (90%) and validation set (10%)
-    from sklearn.model_selection import ShuffleSplit
-    ss = ShuffleSplit(n_splits=5, test_size=0.1, random_state=42).split(df.index)
-
-    # will just do one fold
-    train_idx, valid_idx = next(ss)
-
-    print(f"train: {len(train_idx)}, val: {len(valid_idx)}")
+    fold_no = str(config['fold_no'])
+    _, val_df = util.read_trainval(fold_no)
     
     val_gen = util.RsnaDataGenerator(
-        df.iloc[valid_idx], 
+        val_df, 
         config['batch_size'], 
         config['image_size'], 
         augment_prob=None,
-        #img_dir=config['train_path_dicom'],
-        #img_ext='dcm'
-        img_dir=config['train_path'],
-        img_ext='jpg'
+        img_dir=config['train_path_dicom'],
+        img_ext='dcm'
+        #img_dir=config['train_path'],
+        #img_ext='jpg'
     )
         
     model = util.Model1(
@@ -130,7 +115,7 @@ def evaluate(config):
         weights="imagenet", 
         verbose=1).model
     
-    ckpt_name = os.path.join(config['data_path'], config['experiment'], 'weights.01.hdf5')
+    ckpt_name = os.path.join(config['data_path'], config['experiment'], fold_no, 'weights.01.hdf5')
     print(f'loading {ckpt_name}')
         
     model.load_weights(ckpt_name)
@@ -142,6 +127,6 @@ def evaluate(config):
     return score
 
 if __name__ == '__main__':
-    #run(config, resume_training=True)
-    score = evaluate(config)
-    print(score)
+    run(config, resume_training=False)
+    #score = evaluate(config)
+    #print(score)

@@ -30,7 +30,11 @@ from albumentations import (HorizontalFlip, CenterCrop, ElasticTransform, Blur, 
 from albumentations import OneOf, Compose
 
 def prepare_experiment(config):
-    path = os.path.join(config['data_path'], config['experiment'])
+    path = os.path.join(
+        config['data_path'], 
+        config['experiment'],
+        str(config['fold_no']))
+    
     os.makedirs(path, exist_ok=True)
     
     with open(os.path.join(path, 'config.json'), 'w') as f:
@@ -197,6 +201,7 @@ class RsnaDataGenerator(tf.keras.utils.Sequence):
         self.img_ext = img_ext
         self.augment = augmentation1(augment_prob) if augment_prob is not None else None
         self.return_labels = return_labels
+        self.label_columns = ['any','epidural','intraparenchymal','intraventricular','subarachnoid','subdural']
         self.on_epoch_end()
 
     def __len__(self):
@@ -211,7 +216,7 @@ class RsnaDataGenerator(tf.keras.utils.Sequence):
 
     def _data_generation(self, batch_df):
         X = np.empty((self.batch_size, *self.img_size, 1))
-        for i, ID in enumerate(batch_df.index.values):
+        for i, ID in enumerate(batch_df.image.values):
             fname = os.path.join(self.img_dir, ID + '.' + self.img_ext)
             if self.img_ext == 'dcm':
                 x = _read_dicom3(fname, self.img_size)
@@ -225,7 +230,7 @@ class RsnaDataGenerator(tf.keras.utils.Sequence):
             return X
                     
         Y = np.empty((self.batch_size, 6), dtype=np.float32)
-        for i, label in enumerate(batch_df['Label'].values):
+        for i, label in enumerate(batch_df[self.label_columns].values):
             Y[i,] = label
             
         return X, Y
@@ -241,19 +246,19 @@ class BalancedTrainDataGenerator(RsnaDataGenerator):
         super().__init__(df, batch_size, img_size, 
                          augment_prob=augment_prob,
                          return_labels=return_labels,
-                         img_dir=img_dir, img_ext=img_ext) #, args, kwargs)        
+                         img_dir=img_dir, img_ext=img_ext) #, args, kwargs)
+        self.weights = df.weight.values
         
     def __getitem__(self, index):
-        #indices = self.indices[index*self.batch_size:(index+1)*self.batch_size]
-        #sample half with 'any'==1
-        batch_pos = int(0.5 * self.batch_size)
-        batch_neg = self.batch_size - batch_pos
-        pos = self.df[self.df['Label']['any']==1].sample(n=batch_pos)
-        neg = self.df[self.df['Label']['any']==0].sample(n=batch_neg)
-        return self._data_generation(pd.concat([pos, neg]).sample(frac=1))
-
-
-    
+        #batch_pos = int(0.5 * self.batch_size)
+        #batch_neg = self.batch_size - batch_pos
+        #pos = self.df[self.df['Label']['any']==1].sample(n=batch_pos)
+        #neg = self.df[self.df['Label']['any']==0].sample(n=batch_neg)
+        #return self._data_generation(pd.concat([pos, neg]).sample(frac=1))
+        return self._data_generation(
+            self.df.sample(frac=0.1)
+            .sample(n=self.batch_size, weights='weight', replace=False))
+            
 
 
 
@@ -347,6 +352,11 @@ def read_trainset(filename="../input/stage_1_train.csv", sample=None):
     
     return df
 
+def read_trainval(fold_no):
+    df = pd.read_csv('../data/stage_1_train_folds_weighted.csv')
+    df = df[~df.image.isin(['ID_6431af929'])]
+    return df[df.fold!=int(fold_no)], df[df.fold==int(fold_no)]
+
 
 def weighted_loss_metric(trues, preds, weights=[0.2, 0.1, 0.1, 0.1, 0.1, 0.1], clip_value=1e-7):
     """this is probably not correct, but works OK. Feel free to give feedback."""
@@ -363,5 +373,16 @@ def test_balanced_gen():
         x, y = gen[i]
         print(x.shape, y.shape, np.sum(y, axis=0))
 
+def test_balanced_gen2():
+    train_df, val_df = read_trainval(0)
+    gen = BalancedTrainDataGenerator(train_df, 64, (224, 224), 
+                                     img_dir='../data/stage_1_train_images',
+                                     img_ext='dcm',
+                                     return_labels=True)    
+    import numpy as np
+    for i in range(3):
+        x, y = gen[i]
+        print(np.mean(x), x.shape, y.shape, np.sum(y, axis=0))
+        
 if __name__ == '__main__':
-    test_balanced_gen()
+    test_balanced_gen2()
