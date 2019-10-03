@@ -70,11 +70,11 @@ def run(config, resume_training=False):
 
     ckpt_name = os.path.join(experiment_path, 'weights.{epoch:02d}.hdf5') #{val_loss:.2f}
     #lambda epoch: 1e-3 * pow(0.75, floor(3 / 1))
-    #schedule = lambda epoch, lr: list([lr]*5 + [lr/5]*10)[epoch]
+    schedule = lambda epoch, lr: list([1e-3, 5e-4, 2e-4, 2e-4] + [1e-4]*10)[epoch]
     
     callbacks = [
-        tf.keras.callbacks.ModelCheckpoint(ckpt_name, save_best_only=True), 
-        #tf.keras.callbacks.LearningRateScheduler(schedule, verbose=1)
+        tf.keras.callbacks.ModelCheckpoint(ckpt_name), 
+        tf.keras.callbacks.LearningRateScheduler(schedule, verbose=1)
     ]
     
     if resume_training:
@@ -84,12 +84,12 @@ def run(config, resume_training=False):
             
     model.fit_generator(
         gen, 
-        validation_data=val_gen,
+        #validation_data=val_gen,
         verbose=1, 
         use_multiprocessing=False, workers=config['workers'],
         #class_weight={0: 0.2, 1: 0.1, 2: 0.1, 3: 0.1, 4: 0.1, 5: 0.1},
         #steps_per_epoch=1000,
-        epochs=3,
+        epochs=5,
         callbacks=callbacks)
     
 
@@ -126,7 +126,13 @@ def evaluate(config):
     score = util.weighted_loss_metric(val_df['Label'].values, preds[:len(valid_idx)])
     return score
 
+import argparse
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--fold', dest='fold')
+    args = parser.parse_args()
+    config['fold_no'] = args.fold
     run(config, resume_training=False)
     #score = evaluate(config)
     #print(score)
+
